@@ -42,7 +42,7 @@ def get_annotation_attributes(annotator):
     ANNOT_ATTRIBUTES_FILE = os.path.join(app.static_folder, 'attributes/' + annotator + '/list_of_attributes.txt')
     
     with open(ANNOT_ATTRIBUTES_FILE, 'r') as af:
-        return [line.strip() for line in af.readlines()]
+        return [line.strip() for line in af.readlines() if len(line.strip())]
 
         
 @app.route("/<user>")
