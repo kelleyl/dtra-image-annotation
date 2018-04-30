@@ -1,10 +1,8 @@
 import os
+import sys
 import time
 from datetime import datetime
-import base64
 import json
-import sqlite3
-import pickle
 import logging
 from logging.handlers import RotatingFileHandler
 from flask import Flask, abort, flash, redirect, render_template, request, url_for, jsonify, send_file
@@ -12,65 +10,115 @@ from flask import Flask, abort, flash, redirect, render_template, request, url_f
 
 app = Flask(__name__)
 app.config.from_pyfile('config_file.cfg')
-app.config['DEBUG'] = True
 
-
-ANNOTATORS = ['jmathai']
+ANNOTATORS = app.config['ANNOTATORS']
 APP_URL = app.config['SCHEME'] + '://' + app.config['HOST'] + ':' + app.config['PORT']
-handler = RotatingFileHandler('image-annotation.log', maxBytes=10000, backupCount=1)
-handler.setLevel(logging.INFO)
-app.logger.addHandler(handler)
-app.logger.info("USING APP_URL:%s", APP_URL)
 
 
-def get_image_list(annotator):
+def set_logger():
+    formatter = logging.Formatter(fmt='%(asctime)s %(levelname)-8s %(message)s',
+                                  datefmt='%Y-%m-%d %H:%M:%S')
+    handler = RotatingFileHandler('annotation.log', maxBytes=9e9, backupCount=1)
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(formatter)
+    werk_handler = RotatingFileHandler('flask_server.log', maxBytes=9e9, backupCount=1)
+    logging.getLogger("werkzeug").addHandler(werk_handler)
+    app.logger.addHandler(handler)
+    app.logger.info("USING APP_URL:%s", APP_URL)
+
+def create_folder_structure():
+    '''
+    Create folder structure in static folder for annotation.
+    '''
+    for annotator in ANNOTATORS:
+        annotation_dir = os.path.join(app.static_folder, 'annotations/' + annotator)
+        image_dir = os.path.join(app.static_folder, 'images/' + annotator)
+        attributes_dir = os.path.join(app.static_folder, 'attributes/' + annotator)
+        if not os.path.exists(annotation_dir):
+            app.logger.warn("creating annotation dir %s" % annotation_dir)
+            os.makedirs(annotation_dir)
+        if not os.path.exists(image_dir):
+            app.logger.warn("creating image dir %s" % image_dir)
+            os.makedirs(image_dir)
+        if not os.path.exists(attributes_dir):
+            app.logger.warn("creating attributes dir %s" % attributes_dir)
+            os.makedirs(attributes_dir)
+
+def get_image_url_list(annotator):
     '''
     Return a list of URIs for the images.
     '''
-    IMG_PATH = os.path.join(app.static_folder, 'images/' + annotator)
-    if os.path.exists(IMG_PATH):
-        files = os.listdir(IMG_PATH)
-        return [APP_URL + '/static/images/{}/{}'.format(annotator, f) for f in files]
+    image_path = os.path.join(app.static_folder, 'images/' + annotator)
+    if os.path.exists(image_path):
+        files = os.listdir(image_path)
+        return sorted([APP_URL + '/static/images/{}/{}'.format(annotator, f) for f in files])
     else:
-        app.logger.error('IMG_PATH:%s doesn\'t exist', IMG_PATH)
+        app.logger.error('image_path:%s doesn\'t exist', image_path)
         return []
+
+def get_boxed_image_urls(image_url_list, user):
+    '''
+    Return subset of images for which boxes have been drawn.
+    '''
+    annotation_dir = os.path.join(app.static_folder, 'annotations/' + user)
+    if not os.path.exists(annotation_dir):
+        app.logger.error("[get_boxed_image_urls] Annotation dir:%s doesnot exist.")
+        return []
+    else:
+        boxed_images = []
+        for image in image_url_list:
+            annotation = image.split("/")[-1].split(".")[0] + ".json"
+            if os.path.exists(os.path.join(annotation_dir, annotation)):
+                with open(os.path.join(annotation_dir, annotation), "r") as fh:
+                    annot_data = json.load(fh)
+                    for key, value in annot_data.items():
+                        if len(value["regions"]):
+                            boxed_images.append(image)
+        return boxed_images
 
 def get_annotation_attributes(annotator):
     '''
     Return a list of attributes to be annotated by the user.
     '''
-    ANNOT_ATTRIBUTES_FILE = os.path.join(app.static_folder, 'attributes/' + annotator + '/list_of_attributes.txt')
-    
-    with open(ANNOT_ATTRIBUTES_FILE, 'r') as af:
-        return [line.strip() for line in af.readlines() if len(line.strip())]
+    annot_attribute_file = os.path.join(app.static_folder, 'attributes/' + annotator + '/list_of_attributes.txt')
+    if not os.path.exists(annot_attribute_file):
+        return []
+    else:
+        with open(annot_attribute_file, 'r') as fh:
+            return [line.strip() for line in fh.readlines() if len(line.strip())]
 
-        
-@app.route("/<user>")
-def home(user):
+@app.route("/<user>", defaults={"subset": None})
+@app.route("/<user>/<int:subset>")
+@app.route("/<user>/boxed/<int:subset>")
+def home(user, subset):
     if user in ANNOTATORS:
-        image_list = get_image_list(user)
+        image_url_list = get_image_url_list(user)
+        if subset is not None:
+            image_url_list = image_url_list[(subset - 1) * 100 : (subset - 1) * 100 + 100]
+        if 'boxed' in request.path:
+            image_url_list = get_boxed_image_urls(image_url_list, user)
+            
         attributes_list = get_annotation_attributes(user)
-
-        if not image_list:
+        if not image_url_list:
             app.logger.error('Image list not obtained for user:%s', user)
             return 'No images allotted. \nContact Admin.', 500
-            
         if not attributes_list:
             app.logger.error('Annotation attributes list not obtained for user:%s', user)
             return 'No annotation attributes allotted. \nContact Admin.', 500
-        return render_template('via.html', annotator=user, image_list=get_image_list(user), flask_app_url=APP_URL, attributes_list = get_annotation_attributes(user))
+        return render_template('via.html', annotator=user, image_list=image_url_list,
+                               flask_app_url=APP_URL, attributes_list=attributes_list)
     else:
         app.logger.error('User:%s not in the annotator list', user)
         return abort(404)
-
+        
 @app.route("/<user>/save_changes", methods=["POST"])
 def save_changes(user):
-    ANNOTATION_DIR = os.path.join(app.static_folder, 'annotations/' + user)
+    annotation_dir = os.path.join(app.static_folder, 'annotations/' + user)
     annotations = request.get_json()
     f = annotations['filename'].split('/')[-1]
     file_ext = f.split('.')[-1]
     annotation_file_name = f.replace(file_ext, 'json')
-    annotation_file_path = os.path.join(ANNOTATION_DIR, annotation_file_name)
+    annotation_file_path = os.path.join(annotation_dir, annotation_file_name)
     try:
         with open(annotation_file_path, 'w') as handle:
             json.dump({annotations['filename']:annotations}, handle)
@@ -81,10 +129,10 @@ def save_changes(user):
 
 @app.route("/<user>/save", methods=['POST'])
 def save(user):
-    ANNOTATION_DIR = os.path.join(app.static_folder, 'annotations/' + user)
+    annotation_dir = os.path.join(app.static_folder, 'annotations/' + user)
     annotations = request.get_json()
     annotation_file_name = user + '_annotations_' + time.strftime("%Y_%m_%d_%H:%M:%S", time.localtime()) + '.json'
-    annotation_file_path = os.path.join(ANNOTATION_DIR, annotation_file_name)
+    annotation_file_path = os.path.join(annotation_dir, annotation_file_name)
     try:
         with open(annotation_file_path, 'w') as handle:
             json.dump(annotations, handle)
@@ -99,27 +147,29 @@ def get_image(img_file):
 
 @app.route("/<user>/load")
 def load(user):
-    ANNOTATION_DIR = os.path.join(app.static_folder, 'annotations/' + user)
-    files = os.listdir(ANNOTATION_DIR)
+    annotation_dir = os.path.join(app.static_folder, 'annotations/' + user)
+    if not os.path.exists(annotation_dir):
+        return 'load failed. Annotation dir not present for the user:%s' % user, 501
+    files = os.listdir(annotation_dir)
     annotations = {}
     try:
-        for f in files:
-            f_path = os.path.join(ANNOTATION_DIR, f)
-            with open(f_path, 'r') as handle:
-                f_annotations = json.load(handle)
-            for k, v in f_annotations.items():
-                annotations[k] = v
+        for file in files:
+            f_path = os.path.join(annotation_dir, file)
+            with open(f_path, 'r') as fh:
+                f_annotations = json.load(fh)
+            for key, value in f_annotations.items():
+                annotations[key] = value
     except:
-        app.logger.error('load annotations(file_path:%s) for user:%s failed', ANNOTATION_DIR, user)
+        app.logger.error('load annotations(file_path:%s) for user:%s failed', annotation_dir, user)
         return 'load failed', 500
     return jsonify(annotations)
 
 @app.route('/annotations', defaults={'req_path': ''})
 @app.route('/annotations/<path:req_path>')
 def dir_listing(req_path):
-    BASE_DIR = os.path.join(app.static_folder, 'annotations')
+    base_dir = os.path.join(app.static_folder, 'annotations')
     # Joining the base and the requested path
-    abs_path = os.path.join(BASE_DIR, req_path)
+    abs_path = os.path.join(base_dir, req_path)
 
     # Return 404 if path doesn't exist
     if not os.path.exists(abs_path):
@@ -137,5 +187,7 @@ def dir_listing(req_path):
     files = [os.path.join(req_path, f) for f in files]
     return render_template('files.html', files=files)
 
-    
+
+set_logger()
+create_folder_structure()
 app.run(host=app.config['HOST'],port=int(app.config['PORT']))
