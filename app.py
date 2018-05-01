@@ -101,10 +101,8 @@ def home(user, subset):
         attributes_list = get_annotation_attributes(user)
         if not image_url_list:
             app.logger.error('Image list not obtained for user:%s', user)
-            return 'No images allotted. \nContact Admin.', 500
         if not attributes_list:
             app.logger.error('Annotation attributes list not obtained for user:%s', user)
-            return 'No annotation attributes allotted. \nContact Admin.', 500
         return render_template('via.html', annotator=user, image_list=image_url_list,
                                flask_app_url=APP_URL, attributes_list=attributes_list)
     else:
@@ -158,7 +156,8 @@ def load(user):
             with open(f_path, 'r') as fh:
                 f_annotations = json.load(fh)
             for key, value in f_annotations.items():
-                annotations[key] = value
+                image_name = key.split("/")[-1]
+                annotations["{}/static/images/{}/{}".format(APP_URL, user, image_name)] = value
     except:
         app.logger.error('load annotations(file_path:%s) for user:%s failed', annotation_dir, user)
         return 'load failed', 500
