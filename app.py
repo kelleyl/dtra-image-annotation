@@ -64,17 +64,39 @@ def get_boxed_image_urls(image_url_list, user):
     if not os.path.exists(annotation_dir):
         app.logger.error("[get_boxed_image_urls] Annotation dir:%s doesnot exist.")
         return []
-    else:
-        boxed_images = []
-        for image in image_url_list:
-            annotation = image.split("/")[-1].split(".")[0] + ".json"
-            if os.path.exists(os.path.join(annotation_dir, annotation)):
-                with open(os.path.join(annotation_dir, annotation), "r") as fh:
-                    annot_data = json.load(fh)
-                    for key, value in annot_data.items():
-                        if len(value["regions"]):
-                            boxed_images.append(image)
-        return boxed_images
+
+    boxed_images = []
+    for image in image_url_list:
+        annotation = image.split("/")[-1].split(".")[0] + ".json"
+        if os.path.exists(os.path.join(annotation_dir, annotation)):
+            with open(os.path.join(annotation_dir, annotation), "r") as fh:
+                annot_data = json.load(fh)
+                for key, value in annot_data.items():
+                    if len(value["regions"]):
+                        boxed_images.append(image)
+    return boxed_images
+
+def get_transcribed_image_urls(image_url_list, user):
+    '''
+    Return subset of images which have text in them
+    '''
+    annotation_dir = os.path.join(app.static_folder, 'annotations/' + user)
+    if not os.path.exists(annotation_dir):
+        app.logger.error("[get_transcribed_image_urls] Annotation dir:%s doesnot exist.")
+        return []
+
+    transcribed_images = []
+    for image in image_url_list:
+        annotation = image.split("/")[-1].split(".")[0] + ".json"
+        if os.path.exists(os.path.join(annotation_dir, annotation)):
+            with open(os.path.join(annotation_dir, annotation), "r") as fh:
+                annot_data = json.load(fh)
+                for key, value in annot_data.items():
+                    for box, text in value["regions"].items():
+                        if text['region_attributes'].get('Text', None) is not None:
+                            transcribed_images.append(image)
+                            break
+    return transcribed_images
 
 def get_annotation_attributes(annotator):
     '''
@@ -89,14 +111,22 @@ def get_annotation_attributes(annotator):
 
 @app.route("/<user>", defaults={"subset": None})
 @app.route("/<user>/<int:subset>")
+@app.route("/<user>/unboxed/<int:subset>")
 @app.route("/<user>/boxed/<int:subset>")
+@app.route("/<user>/transcribed/<int:subset>")
 def home(user, subset):
     if user in ANNOTATORS:
         image_url_list = get_image_url_list(user)
         if subset is not None:
             image_url_list = image_url_list[(subset - 1) * 100 : (subset - 1) * 100 + 100]
         if 'boxed' in request.path:
-            image_url_list = get_boxed_image_urls(image_url_list, user)
+            boxed_image_url_list = get_boxed_image_urls(image_url_list, user)
+            if 'unboxed' in request.path:
+                image_url_list = list(set(image_url_list) - set(boxed_image_url_list))
+            else:
+                image_url_list = boxed_image_url_list
+        if 'transcribed' in request.path:
+            image_url_list = get_transcribed_image_urls(image_url_list, user)
             
         attributes_list = get_annotation_attributes(user)
         if not image_url_list:
