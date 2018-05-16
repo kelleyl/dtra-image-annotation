@@ -7,6 +7,8 @@ import logging
 from logging.handlers import RotatingFileHandler
 from flask import Flask, abort, flash, redirect, render_template, request, url_for, jsonify, send_file
 
+from waitress import serve
+
 
 app = Flask(__name__)
 app.config.from_pyfile('config_file.cfg')
@@ -219,4 +221,5 @@ def dir_listing(req_path):
 
 set_logger()
 create_folder_structure()
-app.run(host=app.config['HOST'],port=int(app.config['PORT']))
+# app.run(host=app.config['HOST'],port=int(app.config['PORT']))
+serve(app, host=app.config['HOST'],port=int(app.config['PORT']))
