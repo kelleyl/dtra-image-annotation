@@ -20,13 +20,16 @@ APP_URL = app.config['SCHEME'] + '://' + app.config['HOST'] + ':' + app.config['
 def set_logger():
     formatter = logging.Formatter(fmt='%(asctime)s %(levelname)-8s %(message)s',
                                   datefmt='%Y-%m-%d %H:%M:%S')
-    handler = RotatingFileHandler('annotation.log', maxBytes=9e9, backupCount=1)
-    handler.setLevel(logging.INFO)
-    handler.setFormatter(formatter)
+    app_handler = RotatingFileHandler('annotation.log', maxBytes=9e9, backupCount=1)
+    app_handler.setLevel(logging.INFO)
+    app_handler.setFormatter(formatter)
+    app.logger.addHandler(app_handler)
     werk_handler = RotatingFileHandler('flask_server.log', maxBytes=9e9, backupCount=1)
     logging.getLogger("werkzeug").addHandler(werk_handler)
-    app.logger.addHandler(handler)
-    app.logger.info("USING APP_URL:%s", APP_URL)
+    waitress_logger = logging.getLogger('waitress')
+    waitress_logger.setLevel(logging.INFO)
+    waitress_handler = RotatingFileHandler('waitress_server.log', maxBytes=9e9, backupCount=1)
+    waitress_logger.addHandler(waitress_handler)
 
 def create_folder_structure():
     '''
@@ -70,12 +73,16 @@ def get_boxed_image_urls(image_url_list, user):
     boxed_images = []
     for image in image_url_list:
         annotation = image.split("/")[-1].split(".")[0] + ".json"
-        if os.path.exists(os.path.join(annotation_dir, annotation)):
-            with open(os.path.join(annotation_dir, annotation), "r") as fh:
-                annot_data = json.load(fh)
-                for key, value in annot_data.items():
-                    if len(value["regions"]):
-                        boxed_images.append(image)
+        annotation_path = os.path.join(annotation_dir, annotation)
+        if os.path.exists(annotation_path):
+            try:
+                with open(annotation_path, "r") as fh:
+                    annot_data = json.load(fh)
+                    for key, value in annot_data.items():
+                        if len(value["regions"]):
+                            boxed_images.append(image)
+            except:
+                app.logger.error('get_boxed_image_urls path:%s failed error:%s', annotation_path, sys.exc_info()[0])
     return boxed_images
 
 def get_transcribed_image_urls(image_url_list, user):
@@ -90,14 +97,18 @@ def get_transcribed_image_urls(image_url_list, user):
     transcribed_images = []
     for image in image_url_list:
         annotation = image.split("/")[-1].split(".")[0] + ".json"
-        if os.path.exists(os.path.join(annotation_dir, annotation)):
-            with open(os.path.join(annotation_dir, annotation), "r") as fh:
-                annot_data = json.load(fh)
-                for key, value in annot_data.items():
-                    for box, text in value["regions"].items():
-                        if text['region_attributes'].get('Text', None) is not None:
-                            transcribed_images.append(image)
-                            break
+        annotation_path = os.path.join(annotation_dir, annotation)
+        if os.path.exists(annotation_path):
+            try:
+                with open(annotation_path, "r") as fh:
+                    annot_data = json.load(fh)
+                    for key, value in annot_data.items():
+                        for box, text in value["regions"].items():
+                            if text['region_attributes'].get('Text', None) is not None:
+                                transcribed_images.append(image)
+                                break
+            except:
+                app.logger.error('get_transcribed_image_urls path:%s failed error:%s', annotation_path, sys.exc_info()[0])
     return transcribed_images
 
 def get_annotation_attributes(annotator):
@@ -167,7 +178,7 @@ def save(user):
         with open(annotation_file_path, 'w') as handle:
             json.dump(annotations, handle)
     except:
-        app.logger.error('save (file_path:%s) request received for user:%s failed', annotation_file_path, user)
+        app.logger.error('save (file_path:%s) request received for user:%s failed error:%s', annotation_file_path, user, sys.exc_info()[0])
         return 'Annotation save failed.', 500
     return "Annotations saved.", 200
 
@@ -182,17 +193,16 @@ def load(user):
         return 'load failed. Annotation dir not present for the user:%s' % user, 501
     files = os.listdir(annotation_dir)
     annotations = {}
-    try:
-        for file in files:
-            f_path = os.path.join(annotation_dir, file)
+    for file in files:
+        f_path = os.path.join(annotation_dir, file)
+        try:
             with open(f_path, 'r') as fh:
                 f_annotations = json.load(fh)
             for key, value in f_annotations.items():
                 image_name = key.split("/")[-1]
                 annotations["{}/static/images/{}/{}".format(APP_URL, user, image_name)] = value
-    except:
-        app.logger.error('load annotations(file_path:%s) for user:%s failed', annotation_dir, user)
-        return 'load failed', 500
+        except:
+            app.logger.error('load annotations(file_path:%s) for user:%s failed error:%s', f_path, user, sys.exc_info()[0])
     return jsonify(annotations)
 
 @app.route('/annotations', defaults={'req_path': ''})
