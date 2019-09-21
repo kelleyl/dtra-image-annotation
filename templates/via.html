@@ -42,11 +42,19 @@
     If you do not wish to share this data, you can safely remove the
     javascript code below.
     -->
+    <script type="text/javascript">
+      (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+        (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+                               m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+                              })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+      ga('create', 'UA-20555581-2', 'auto');
+      ga('set', 'page', 'via-2.0.0.html');
+      ga('send', 'pageview');
+    </script>
 
-    <script src="//code.jquery.com/jquery-1.11.3.min.js" crossorigin="anonymous"></script>
 <!-- START: Contents of file: via.css-->
 <style>
-/* 
+/*
   CSS style definitions for VIA 2.x.y
   http://www.robots.ox.ac.uk/~vgg/software/via/
   Author: Abhishek Dutta <adutta@robots.ox.ac.uk>
@@ -988,9 +996,14 @@ POSSIBILITY OF SUCH DAMAGE.
          items like Keyboard Shortcut hidden under the attributes panel -->
     <div style="width: 100%;" id="vertical_space"></div>
 
-    <!-- DEMO SCRIPT AUTOMATICALLY INSERTED BY VIA PACKER SCRIPT -->
+<script src="static/js/customization.js"></script>
 <!-- START: Contents of file: via.js-->
 <script>
+    // load from url
+
+    var img_url_list = {{ image_list|tojson }};
+    var attributes_list_for_user = {{ attributes_list|tojson}};
+
 /*
   VGG Image Annotator (via)
   www.robots.ox.ac.uk/~vgg/software/via/
@@ -1232,8 +1245,6 @@ var _via_image_grid_group                   = {}; // {'value':[image_index_list]
 var _via_image_grid_group_var               = []; // {type, name, value}
 var _via_image_grid_group_show_all          = false;
 var _via_image_grid_stack_prev_page         = []; // stack of first img index of every page navigated so far
-var _via_loaded_img_fn_list = [];
-var _via_reload_img_table = true;
 
 // image buffer
 var VIA_IMG_PRELOAD_INDICES         = [1, -1, 2, 3, -2, 4]; // for any image, preload previous 2 and next 4 images
@@ -1292,47 +1303,13 @@ var BBOX_BOUNDARY_FILL_COLOR_NEW       = "#aaeeff";
 var BBOX_BOUNDARY_LINE_COLOR           = "#1a1a1a";
 var BBOX_SELECTED_FILL_COLOR           = "#ffffff";
 
-// save to server setup
-var annotator = '{{annotator}}';
-var app_url = '{{flask_app_url}}';
+var VIA_ANNOTATION_EDITOR_HEIGHT_CHANGE   = 5;   // in percent
+var VIA_ANNOTATION_EDITOR_FONTSIZE_CHANGE = 0.1; // in rem
+var VIA_IMAGE_GRID_IMG_HEIGHT_CHANGE      = 20;  // in percent
+var VIA_LEFTSIDEBAR_WIDTH_CHANGE          = 1;   // in rem
+var VIA_POLYGON_SEGMENT_SUBTENDED_ANGLE   = 5;   // in degree (used to approximate shapes using polygon)
+var VIA_FLOAT_PRECISION = 3; // number of decimal places to include in float values
 
-// load from url
-var img_url_list = {{ image_list|tojson }};
-var attributes_list_for_user = {{ attributes_list|tojson}};
-function init_payload() {
-    for (var i=0; i<img_url_list.length; ++i) {
-        console.log('loaded ' + i)
-    	var url = img_url_list[i];
-    	var filename = url.substring(url.lastIndexOf('/')+1);
-    	var img = new file_metadata(url, 0);
-    	img.base64_img_data = url;
-
-    	var img_id = _via_get_image_id(url);
-
-    	_via_img_metadata[img_id] = img;
-    	_via_image_id_list.push(img_id);
-    	_via_img_count += 1;
-    	_via_reload_img_table = true;
-    	_via_image_filename_list.push(img_url_list[i])
-    }
-    //_via_image_index = get_random_int(0, img_url_list.length);
-
-	//populate the attributes that can be annotated by the user
-	for(var i=0; i<attributes_list_for_user.length; ++i){
-		_via_attributes['region'][i] = { 'type' : 'text' }
-	}
-
-
-    _via_image_index = 0;
-    _via_show_img(_via_image_index);
-    load_annotations_from_server();
-}
-
-init_payload();
-$(function() {
-    $('#loaded_img_panel').click();
-    $('#reg_attr_panel_button').click();
-});
 //
 // Data structure to store metadata about file and regions
 //
@@ -1351,25 +1328,6 @@ function file_region() {
 //
 // Initialization routine
 //
-
-function load_annotations_from_server(){
-  remove_via_data_from_localStorage();
-  $.ajax({
-              type: "GET", //rest Type
-              url: app_url+"/"+annotator+"/load",
-              contentType: "application/json; charset=utf-8",
-              async: false,
-              success: function (msg) {
-                  console.log('annotations from server :' + msg);
-                  var annotations = JSON.stringify(msg);
-                  import_annotations_from_json(annotations);
-              },
-              error: function(XMLHttpRequest, textstatus, error) {
-					           alert( "Submit failed: " + error + "\nAnnotations not loaded!");
-              }
-        });
-}
-
 function _via_init() {
   console.log(VIA_NAME);
   show_message(VIA_NAME + ' (' + VIA_SHORT_NAME + ') version ' + VIA_VERSION +
@@ -1401,6 +1359,7 @@ function _via_init() {
   attribute_update_panel_set_active_button();
   annotation_editor_set_active_button();
   init_message_panel();
+  init_payload()
 
   // run attached sub-modules (if any)
   // e.g. demo modules
@@ -1622,103 +1581,6 @@ function sel_local_data_file(type) {
     invisible_file_input.removeAttribute('multiple');
     invisible_file_input.click();
   }
-}
-function import_attributes() {
-  if (_via_current_image_loaded) {
-    if (invisible_file_input) {
-      invisible_file_input.accept   = '.csv,.json';
-      invisible_file_input.onchange = import_region_attributes_from_file;
-      invisible_file_input.click();
-    }
-  } else {
-    show_message("Please load some images first");
-  }
-}
-function show_about_panel() {
-  set_all_text_panel_display('none');
-  document.getElementById("about_panel").style.display = "block";
-  canvas_panel.style.display = "none";
-}
-function show_getting_started_panel() {
-  set_all_text_panel_display('none');
-  document.getElementById("getting_started_panel").style.display = "block";
-  canvas_panel.style.display = "none";
-}
-function show_license_panel() {
-  set_all_text_panel_display('none');
-  document.getElementById("license_panel").style.display = 'block';
-  canvas_panel.style.display = "none";
-}
-function set_all_text_panel_display(style_display) {
-  var tp = document.getElementsByClassName('text_panel');
-  for ( var i = 0; i < tp.length; ++i ) {
-    tp[i].style.display = style_display;
-  }
-}
-function clear_image_display_area() {
-  hide_all_canvas();
-  set_all_text_panel_display('none');
-}
-
-//
-// Local file uploaders
-//
-function store_local_img_ref(event) {
-  var user_selected_images = event.target.files;
-  console.log(user_selected_images);
-  var original_image_count = _via_img_count;
-
-  // clear browser cache if user chooses to load new images
-  if (original_image_count === 0) {
-	remove_via_data_from_localStorage();
-  }
-
-  var discarded_file_count = 0;
-  for ( var i = 0; i < user_selected_images.length; ++i ) {
-    var filetype = user_selected_images[i].type.substr(0, 5);
-    if ( filetype === 'image' ) {
-      var filename = user_selected_images[i].name;
-      var size     = user_selected_images[i].size;
-      var img_id   = _via_get_image_id(filename, size);
-
-      if ( _via_img_metadata.hasOwnProperty(img_id) ) {
-        if ( _via_img_metadata[img_id].fileref ) {
-          show_message('Image ' + filename + ' already loaded. Skipping!');
-        } else {
-          _via_img_metadata[img_id].fileref = user_selected_images[i];
-          show_message('Regions already exist for file ' + filename + ' !');
-        }
-      } else {
-        _via_img_metadata[img_id] = new ImageMetadata(user_selected_images[i],
-                                                      filename,
-                                                      size);
-        _via_image_id_list.push(img_id);
-        _via_img_count += 1;
-        _via_reload_img_table = true;
-      }
-    } else {
-      discarded_file_count += 1;
-    }
-  }
-
-  if ( _via_img_metadata ) {
-    var status_msg = 'Loaded ' + (_via_img_count - original_image_count) + ' images.';
-    if ( discarded_file_count ) {
-      status_msg += ' ( Discarded ' + discarded_file_count + ' non-image files! )';
-    }
-    show_message(status_msg);
-
-    if ( _via_image_index === -1 ) {
-      show_image(0);
-    } else {
-      show_image( original_image_count );
-    }
-    toggle_img_list();
-  } else {
-    show_message("Please upload some image files!");
-  }
-  console.log('loading the last saved annotations from server.');
-  load_annotations_from_server();
 }
 
 //
@@ -2670,14 +2532,6 @@ function hide_all_canvas() {
   image_panel.style.display = 'none';
 }
 
-function remove_via_data_from_localStorage() {
-  if( check_local_storage() && is_via_data_in_localStorage() ) {
-    localStorage.removeItem('_via_timestamp');
-    localStorage.removeItem('_via_img_metadata');
-  }
-}
-
-
 function jump_to_image(image_index) {
   if ( _via_img_count <= 0 ) {
     return;
@@ -2701,7 +2555,7 @@ function jump_to_image(image_index) {
 
 function count_missing_region_attr(img_id) {
   var miss_region_attr_count = 0;
-  var attr_count = Object.keys(_via_attributes['region']).length;
+  var attr_count = Object.keys(_via_region_attributes).length;
   for( var i=0; i < _via_img_metadata[img_id].regions.length; ++i ) {
     var set_attr_count = Object.keys(_via_img_metadata[img_id].regions[i].region_attributes).length;
     miss_region_attr_count += ( attr_count - set_attr_count );
@@ -3258,22 +3112,6 @@ function _via_reg_canvas_mouseup_handler(e) {
       show_message('Prevented accidental addition of a very small region.');
     }
     return;
-  }
-}
-//
-// Persistence of annotation data in browser cache (i.e. localStorage)
-//
-
-function check_local_storage() {
-  // https://developer.mozilla.org/en-US/docs/Web/API/Web_Storage_API/Using_the_Web_Storage_API
-  try {
-    var x = '__storage_test__';
-    localStorage.setItem(x, x);
-    localStorage.removeItem(x);
-    return true;
-  }
-  catch(e) {
-    return false;
   }
 }
 
@@ -5912,77 +5750,25 @@ function is_region_annotation_missing(img_id) {
   return false;
 }
 
-function save_annotations_to_server(annotations){
-  console.log('saving annotations to server.');
-  console.log('changing file:', _via_image_id);
-  // console.log(JSON.stringify(JSON.parse(annotations)[_via_image_id]));
-  changed_annotation = JSON.stringify(JSON.parse(annotations)[_via_image_id]);
-  $.ajax({
-       url: app_url+'/'+annotator+'/save_changes',
-       type: 'POST',
-       contentType:'application/json',
-       data: changed_annotation,
-       dataType:'json',
-       success: function(){ console.log('successfully uploaded annotation cache'); },
-       error: function(){ console.log('failed to upload annotations to server');}
-     });
-}
-
-function save_current_data_to_cache() {
-  setTimeout(function() {
-    console.log('saving annotations to server cache...');
-    if ( ! _via_is_save_ongoing){
-       _via_is_save_ongoing = true;
-       var img_metadata = pack_via_metadata('json');
-       save_annotations_to_server(img_metadata[0]);
-       _via_is_save_ongoing = false;
-    }
-    else{
-       console.log('saving annotations to server failed. Another save ongoing!');
-    }
-    console.log('finished saving annotations to server cache.');
-  });
-  setTimeout(function() {
-    console.log('saving annotations to browser cache...');
-    if ( _via_is_local_storage_available &&
-         ! _via_is_save_ongoing) {
-      try {
-        _via_is_save_ongoing = true;
-        var img_metadata = pack_via_metadata('json');
-        var timenow = new Date().toUTCString();
-        localStorage.setItem('_via_timestamp', timenow);
-        localStorage.setItem('_via_img_metadata', img_metadata[0]);
-        // save attributes
-        var attr = [];
-        for (var attribute of _via_attributes['region']) {
-          attr.push(attribute);
-        }
-        localStorage.setItem('_via_region_attributes', JSON.stringify(attr));
-        _via_is_save_ongoing = false;
-      } catch(err) {
-        _via_is_save_ongoing = false;
-        _via_is_local_storage_available = false;
-        show_message('Failed to save annotation data to browser cache.');
-        alert('Failed to save annotation data to browser cache.');
-        console.log('Failed to save annotation data to browser cache');
-        console.log(err.message);
+function is_file_annotation_missing(img_id) {
+  var file_attribute;
+  for ( file_attribute in _via_attributes['file'] ) {
+    if ( _via_img_metadata[img_id].file_attributes.hasOwnProperty(file_attribute) ) {
+      if ( _via_img_metadata[img_id].file_attributes[file_attribute] === '' ) {
+        return true;
       }
+    } else {
+      return true;
     }
-    else{
-        console.log('failed to save annotations to browser cache. local_storage_available:'
-                         + _via_is_local_storage_available
-                         + ' ongoing save:' + _via_is_save_ongoing);
-    }
-    console.log('finished saving to browser cache');
-  }, 1000);
+  }
+  return false;
 }
 
-function is_via_data_in_localStorage() {
-  if ( localStorage.getItem('_via_timestamp') &&
-       localStorage.getItem('_via_img_metadata') ) {
-    return true;
+function img_fn_list_ith_entry_selected(img_index, is_selected) {
+  if ( is_selected ) {
+    img_fn_list_ith_entry_add_css_class(img_index, 'sel');
   } else {
-    return false;
+    img_fn_list_ith_entry_remove_css_class(img_index, 'sel');
   }
 }
 
@@ -10090,102 +9876,102 @@ function _via_buffer_hide_current_image() {
   }
 }
 
-{#visible{#function _via_show_img_from_buffer(img_index) {#}
-{#  return new Promise( function(ok_callback, err_callback) {#}
-{#    _via_buffer_hide_current_image();#}
-{##}
-{#    var cimg_html_id = _via_img_buffer_get_html_id(img_index);#}
-{#    _via_current_image = document.getElementById(cimg_html_id);#}
-{#    if ( ! _via_current_image ) {#}
-{#      // the said image is not present in buffer, which could be because#}
-{#      // the image got removed from the buffer#}
-{#      err_callback(img_index);#}
-{#      return;#}
-{#    }#}
-{#    _via_current_image.classList.add('visible'); // now show the new image#}
-{##}
-{#    _via_image_index = img_index;#}
-{#    _via_image_id    = _via_image_id_list[_via_image_index];#}
-{#    _via_current_image_filename = _via_img_metadata[_via_image_id].filename;#}
-{#    _via_current_image_loaded = true;#}
-{##}
-{#    var arr_index = _via_buffer_img_index_list.indexOf(img_index);#}
-{#    _via_buffer_img_shown_timestamp[arr_index] = Date.now(); // update shown timestamp#}
-{##}
-{#    // update the current state of application#}
-{#    _via_click_x0 = 0; _via_click_y0 = 0;#}
-{#    _via_click_x1 = 0; _via_click_y1 = 0;#}
-{#    _via_is_user_drawing_region = false;#}
-{#    _via_is_window_resized = false;#}
-{#    _via_is_user_resizing_region = false;#}
-{#    _via_is_user_moving_region = false;#}
-{#    _via_is_user_drawing_polygon = false;#}
-{#    _via_is_region_selected = false;#}
-{#    _via_user_sel_region_id = -1;#}
-{#    _via_current_image_width = _via_current_image.naturalWidth;#}
-{#    _via_current_image_height = _via_current_image.naturalHeight;#}
-{##}
-{#    if ( _via_current_image_width === 0 || _via_current_image_height === 0 ) {#}
-{#      // for error image icon#}
-{#      _via_current_image_width = 640;#}
-{#      _via_current_image_height = 480;#}
-{#    }#}
-{##}
-{#    // set the size of canvas#}
-{#    // based on the current dimension of browser window#}
-{#    var de = document.documentElement;#}
-{#    var image_panel_width = de.clientWidth - leftsidebar.clientWidth - 20;#}
-{#    if ( leftsidebar.style.display === 'none' ) {#}
-{#      image_panel_width = de.clientWidth;#}
-{#    }#}
-{#    var image_panel_height = de.clientHeight - 2*ui_top_panel.offsetHeight;#}
-{##}
-{#    _via_canvas_width = _via_current_image_width;#}
-{#    _via_canvas_height = _via_current_image_height;#}
-{##}
-{#    if ( _via_canvas_width > image_panel_width ) {#}
-{#      // resize image to match the panel width#}
-{#      var scale_width = image_panel_width / _via_current_image.naturalWidth;#}
-{#      _via_canvas_width = image_panel_width;#}
-{#      _via_canvas_height = _via_current_image.naturalHeight * scale_width;#}
-{#    }#}
-{#    if ( _via_canvas_height > image_panel_height ) {#}
-{#      // resize further image if its height is larger than the image panel#}
-{#      var scale_height = image_panel_height / _via_canvas_height;#}
-{#      _via_canvas_height = image_panel_height;#}
-{#      _via_canvas_width = _via_canvas_width * scale_height;#}
-{#    }#}
-{#    _via_canvas_width = Math.round(_via_canvas_width);#}
-{#    _via_canvas_height = Math.round(_via_canvas_height);#}
-{#    _via_canvas_scale = _via_current_image.naturalWidth / _via_canvas_width;#}
-{#    _via_canvas_scale_without_zoom = _via_canvas_scale;#}
-{#    set_all_canvas_size(_via_canvas_width, _via_canvas_height);#}
-{#    //set_all_canvas_scale(_via_canvas_scale_without_zoom);#}
-{##}
-{#    // reset all regions to "not selected" state#}
-{#    toggle_all_regions_selection(false);#}
-{##}
-{#    // ensure that all the canvas are visible#}
-{#    set_display_area_content( VIA_DISPLAY_AREA_CONTENT_NAME.IMAGE );#}
-{##}
-{#    // update img_fn_list#}
-{#    img_fn_list_ith_entry_selected(_via_image_index, true);#}
-{#    img_fn_list_scroll_to_current_file();#}
-{##}
-{#    // refresh the annotations panel#}
-{#    annotation_editor_update_content();#}
-{##}
-{#    _via_load_canvas_regions(); // image to canvas space transform#}
-{#    _via_redraw_reg_canvas();#}
-{#    _via_reg_canvas.focus();#}
-{##}
-{#    // Preserve zoom level#}
-{#    if (_via_is_canvas_zoomed) {#}
-{#      set_zoom( _via_canvas_zoom_level_index );#}
-{#    }#}
-{#    ok_callback(img_index);#}
-{#  });#}
+function _via_show_img_from_buffer(img_index) {
+  return new Promise( function(ok_callback, err_callback) {
+    _via_buffer_hide_current_image();
 
+    var cimg_html_id = _via_img_buffer_get_html_id(img_index);
+    _via_current_image = document.getElementById(cimg_html_id);
+    if ( ! _via_current_image ) {
+      // the said image is not present in buffer, which could be because
+      // the image got removed from the buffer
+      err_callback(img_index);
+      return;
+    }
+    _via_current_image.classList.add('visible'); // now show the new image
+
+    _via_image_index = img_index;
+    _via_image_id    = _via_image_id_list[_via_image_index];
+    _via_current_image_filename = _via_img_metadata[_via_image_id].filename;
+    _via_current_image_loaded = true;
+
+    var arr_index = _via_buffer_img_index_list.indexOf(img_index);
+    _via_buffer_img_shown_timestamp[arr_index] = Date.now(); // update shown timestamp
+
+    // update the current state of application
+    _via_click_x0 = 0; _via_click_y0 = 0;
+    _via_click_x1 = 0; _via_click_y1 = 0;
+    _via_is_user_drawing_region = false;
+    _via_is_window_resized = false;
+    _via_is_user_resizing_region = false;
+    _via_is_user_moving_region = false;
+    _via_is_user_drawing_polygon = false;
+    _via_is_region_selected = false;
+    _via_user_sel_region_id = -1;
+    _via_current_image_width = _via_current_image.naturalWidth;
+    _via_current_image_height = _via_current_image.naturalHeight;
+
+    if ( _via_current_image_width === 0 || _via_current_image_height === 0 ) {
+      // for error image icon
+      _via_current_image_width = 640;
+      _via_current_image_height = 480;
+    }
+
+    // set the size of canvas
+    // based on the current dimension of browser window
+    var de = document.documentElement;
+    var image_panel_width = de.clientWidth - leftsidebar.clientWidth - 20;
+    if ( leftsidebar.style.display === 'none' ) {
+      image_panel_width = de.clientWidth;
+    }
+    var image_panel_height = de.clientHeight - 2*ui_top_panel.offsetHeight;
+
+    _via_canvas_width = _via_current_image_width;
+    _via_canvas_height = _via_current_image_height;
+
+    if ( _via_canvas_width > image_panel_width ) {
+      // resize image to match the panel width
+      var scale_width = image_panel_width / _via_current_image.naturalWidth;
+      _via_canvas_width = image_panel_width;
+      _via_canvas_height = _via_current_image.naturalHeight * scale_width;
+    }
+    if ( _via_canvas_height > image_panel_height ) {
+      // resize further image if its height is larger than the image panel
+      var scale_height = image_panel_height / _via_canvas_height;
+      _via_canvas_height = image_panel_height;
+      _via_canvas_width = _via_canvas_width * scale_height;
+    }
+    _via_canvas_width = Math.round(_via_canvas_width);
+    _via_canvas_height = Math.round(_via_canvas_height);
+    _via_canvas_scale = _via_current_image.naturalWidth / _via_canvas_width;
+    _via_canvas_scale_without_zoom = _via_canvas_scale;
+    set_all_canvas_size(_via_canvas_width, _via_canvas_height);
+    //set_all_canvas_scale(_via_canvas_scale_without_zoom);
+
+    // reset all regions to "not selected" state
+    toggle_all_regions_selection(false);
+
+    // ensure that all the canvas are visible
+    set_display_area_content( VIA_DISPLAY_AREA_CONTENT_NAME.IMAGE );
+
+    // update img_fn_list
+    img_fn_list_ith_entry_selected(_via_image_index, true);
+    img_fn_list_scroll_to_current_file();
+
+    // refresh the annotations panel
+    annotation_editor_update_content();
+
+    _via_load_canvas_regions(); // image to canvas space transform
+    _via_redraw_reg_canvas();
+    _via_reg_canvas.focus();
+
+    // Preserve zoom level
+    if (_via_is_canvas_zoomed) {
+      set_zoom( _via_canvas_zoom_level_index );
+    }
+    ok_callback(img_index);
+  });
+}
 
 function _via_img_buffer_add_image(img_index) {
   return new Promise( function(ok_callback, err_callback) {
@@ -11017,6 +10803,7 @@ function polygon_to_bbox(pts) {
   }
   return [xmin, ymin, xmax-xmin, ymax-ymin];
 }
+
 </script>
 <!-- END: Contents of file: via.js-->
   </body>

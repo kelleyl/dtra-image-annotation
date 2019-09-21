@@ -5,6 +5,7 @@ from datetime import datetime
 import json
 import logging
 import redis
+import base64
 from logging.handlers import RotatingFileHandler
 from flask import Flask, abort, flash, redirect, render_template, request, url_for, jsonify, send_file
 
@@ -103,6 +104,17 @@ def get_annotation_attributes(annotator):
         with open(annot_attribute_file, 'r') as fh:
             return [line.strip() for line in fh.readlines() if len(line.strip())]
 
+def get_files_data():
+    '''
+    :return: list of (filename, data) tuples
+    '''
+    #get_image_url_list annotator
+    filename = "10619-0.jpg"
+    with open("static/images/1/10619-0.jpg", "rb") as image_file:
+        filedata = base64.b64encode(image_file.read())
+
+    return [str(filename), str(filedata)]
+
 @app.route("/<user>", defaults={"subset": None})
 @app.route("/<user>/<int:subset>")
 @app.route("/<user>/unboxed/<int:subset>")
@@ -128,11 +140,11 @@ def home(user, subset):
         if not attributes_list:
             app.logger.error('Annotation attributes list not obtained for user:%s', user)
         return render_template('via.html', annotator=user, image_list=image_url_list,
-                               flask_app_url=APP_URL, attributes_list=attributes_list)
+                               flask_app_url=APP_URL, attributes_list=attributes_list, test=get_files_data())
     else:
         app.logger.error('User:%s not in the annotator list', user)
         return abort(404)
-        
+
 @app.route("/<user>/save_changes", methods=["POST"])
 def save_changes(user):
     annotations = request.get_json()
