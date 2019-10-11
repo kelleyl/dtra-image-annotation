@@ -4,10 +4,12 @@ import time
 from datetime import datetime
 import json
 import logging
+from functools import wraps
+
 import redis
 import base64
 from logging.handlers import RotatingFileHandler
-from flask import Flask, abort, flash, redirect, render_template, request, url_for, jsonify, send_file
+from flask import Flask, abort, flash, redirect, render_template, request, url_for, jsonify, send_file, Response
 
 from waitress import serve
 
@@ -77,10 +79,34 @@ def get_boxed_image_urls(image_url_list, user):
                 boxed_images.append(image)
     return boxed_images
 
+def requires_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not auth or not check_auth(auth.username, auth.password):
+            return authenticate()
+        return f(*args, **kwargs)
+    return decorated
+
+def check_auth(username, password):
+    """This function is called to check if a username /
+    password combination is valid.
+    """
+    return password == app.config["PASSWORD"]
+
+def authenticate():
+    """Sends a 401 response that enables basic auth"""
+    return Response(
+    'Could not verify your access level for that URL.\n'
+    'You have to login with proper credentials', 401,
+    {'WWW-Authenticate': 'Basic realm="Login Required"'})
+
+
 @app.route("/<user>", defaults={"subset": None})
 @app.route("/<user>/<int:subset>")
 @app.route("/<user>/unboxed/<int:subset>")
 @app.route("/<user>/boxed/<int:subset>")
+@requires_auth
 def home(user, subset):
     if user in ANNOTATORS:
         image_url_list = get_image_url_list(user)
